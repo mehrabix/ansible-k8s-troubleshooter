@@ -56,7 +56,7 @@ ansible-k8s-troubleshooter/
 │   ├── hosts.ini
 │   └── group_vars/all.yml        # shared vars (env, lab_namespace, app_name, ...)
 ├── vars/{dev,prod}.yml           # per-environment values
-├── vault/secrets.yml             # Ansible Vault (encrypted)
+├── vault/secrets.yml.example     # copy it + encrypt with your own password
 ├── roles/crashloop/
 │   ├── tasks/main.yml            # the phase 0-4 loop
 │   ├── handlers/main.yml         # "Restart the deployment" on config change
@@ -78,8 +78,10 @@ ansible-k8s-troubleshooter/
 ## Usage
 
 ```bash
-# one-time: create the lab vault password file (never commit it)
-echo 'lab-vault-password' > .vault_pass
+# one-time: create the encrypted credentials file with YOUR OWN password
+cp vault/secrets.yml.example vault/secrets.yml
+openssl rand -hex 16 > .vault_pass          # your vault password (gitignored)
+ansible-vault encrypt vault/secrets.yml --vault-password-file .vault_pass
 
 make run ENV=dev            # full loop in dev
 make run ENV=prod           # full loop in prod (uses the Vault)
@@ -120,6 +122,8 @@ TASK [crashloop : Phase 4 | assert recovery] ***
 - The runner deliberately deletes and recreates the workload each run so the
   reproduction is deterministic — it is a *simulator*, not a converge-to-state
   play. It always ends in the healed state.
-- `dev` needs no secret handling; `prod` demonstrates Vault. The lab vault
-  password in the README is a placeholder — a real password never lives in the
-  repo or a text file (`--vault-password-file` from a secret manager / CI secret).
+- `dev` needs no secret handling; `prod` demonstrates Vault.
+- **No secret material is committed.** `vault/secrets.yml` and `.vault_pass` are
+  gitignored; the repo ships only `vault/secrets.yml.example`. The vault password
+  is distributed out-of-band — a secret manager, a CI secret, or `--ask-vault-pass`
+  — never a file in the repo.

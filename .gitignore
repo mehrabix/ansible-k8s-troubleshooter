@@ -2,3 +2,4 @@
 *.retry
 __pycache__/
 .ansible/
+vault/secrets.yml
