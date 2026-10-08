@@ -1,0 +1,8 @@
+# Values shared by every environment and scenario.
+# `env` can be overridden on the command line: -e env=prod
+env: dev
+lab_namespace: "tshoot-{{ env }}"
+app_name: webapp
+secret_name: webapp-db
+image: busybox:1.36
+scenario: crashloop

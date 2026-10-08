@@ -1,0 +1,19 @@
+---
+# Remove everything a scenario created.
+#
+#   ansible-playbook playbooks/teardown.yml -e env=dev
+- name: "Tear down the lab environment"
+  hosts: lab
+  gather_facts: false
+
+  vars_files:
+    - "../vars/{{ env }}.yml"
+
+  tasks:
+    - name: "Delete the scenario namespace"
+      kubernetes.core.k8s:
+        state: absent
+        api_version: v1
+        kind: Namespace
+        name: "{{ lab_namespace }}"
+        wait: true

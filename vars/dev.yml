@@ -1,0 +1,9 @@
+# --- dev environment --------------------------------------------------------
+env: dev
+replicas: 1
+cpu_request: 50m
+cpu_limit: 250m
+mem_request: 64Mi
+mem_limit: 128Mi
+# dev uses a throwaway database URL (no Vault needed)
+database_url: "postgres://dev:dev@localhost:5432/devdb"

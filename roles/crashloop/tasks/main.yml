@@ -1,0 +1,167 @@
+---
+# A Kubernetes troubleshooting scenario, automated end to end:
+#   Phase 0  create the namespace and Service
+#   Phase 1  deploy the workload WITHOUT its configuration -> reproduce the failure
+#   Phase 2  assert the failure, then run the on-call diagnosis commands
+#   Phase 3  apply the fix (the missing Secret + the config reference)
+#   Phase 4  assert recovery
+#
+# It is idempotent and safe to re-run.
+
+- name: "Phase 0 | ensure the namespace"
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ lookup('ansible.builtin.template', 'namespace.yaml.j2') | from_yaml }}"
+  tags: [deploy]
+
+- name: "Phase 0 | ensure the Service exists"
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ lookup('ansible.builtin.template', 'service.yaml.j2') | from_yaml }}"
+  tags: [deploy]
+
+# ---------------------------------------------------------------------------
+# Phase 1 - reproduce the failure
+# ---------------------------------------------------------------------------
+
+- name: "Phase 1 | reset the workload so the reproduction is deterministic"
+  kubernetes.core.k8s:
+    state: absent
+    api_version: apps/v1
+    kind: Deployment
+    namespace: "{{ lab_namespace }}"
+    name: "{{ app_name }}"
+    wait: true
+  tags: [reproduce]
+- name: "Phase 1 | deploy the app WITHOUT its configuration"
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ lookup('ansible.builtin.template', 'deployment.yaml.j2') | from_yaml }}"
+  vars:
+    crashloop_config: false
+  tags: [deploy, reproduce]
+
+- name: "Phase 1 | wait for the container to start failing"
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Pod
+    namespace: "{{ lab_namespace }}"
+    label_selectors:
+      - "app={{ app_name }}"
+  register: crashloop_pods
+  until:
+    - crashloop_pods.resources | length > 0
+    - crashloop_pods.resources[0].status.containerStatuses | default([]) | length > 0
+    - crashloop_pods.resources[0].status.containerStatuses[0].restartCount | default(0) | int > 0
+  retries: 30
+  delay: 5
+  tags: [reproduce]
+
+- name: "Phase 1 | assert the failure is reproduced"
+  ansible.builtin.assert:
+    that:
+      - crashloop_pods.resources | length > 0
+      - crashloop_pods.resources[0].status.containerStatuses[0].restartCount | int > 0
+      - crashloop_pods.resources[0].status.containerStatuses[0].lastState.terminated.reason | default('') == 'Error'
+      - crashloop_pods.resources[0].status.containerStatuses[0].lastState.terminated.exitCode | default(0) | int == 1
+    success_msg: >-
+      FAILURE REPRODUCED - {{ crashloop_pods.resources[0].metadata.name }}
+      restarts={{ crashloop_pods.resources[0].status.containerStatuses[0].restartCount }}
+      reason=Error exit=1
+    fail_msg: "Expected a CrashLoopBackOff-style failure, but it was not observed"
+  tags: [reproduce, verify]
+
+# ---------------------------------------------------------------------------
+# Phase 2 - diagnose (the commands an on-call engineer would run)
+# ---------------------------------------------------------------------------
+- name: "Phase 2 | describe the failing Pod"
+  ansible.builtin.command:
+    cmd: "kubectl -n {{ lab_namespace }} describe pod {{ crashloop_pods.resources[0].metadata.name }}"
+  register: crashloop_describe
+  changed_when: false
+  tags: [diagnose]
+
+- name: "Phase 2 | read the previous container's logs"
+  ansible.builtin.command:
+    cmd: "kubectl -n {{ lab_namespace }} logs {{ crashloop_pods.resources[0].metadata.name }} --previous"
+  register: crashloop_logs
+  failed_when: false
+  changed_when: false
+  tags: [diagnose]
+
+- name: "Phase 2 | print the diagnosis"
+  ansible.builtin.debug:
+    msg:
+      - "pod          : {{ crashloop_pods.resources[0].metadata.name }}"
+      - "restartCount : {{ crashloop_pods.resources[0].status.containerStatuses[0].restartCount }}"
+      - "lastState    : {{ crashloop_pods.resources[0].status.containerStatuses[0].lastState.terminated.reason }}"
+      - "exitCode     : {{ crashloop_pods.resources[0].status.containerStatuses[0].lastState.terminated.exitCode }}"
+      - "previous log : {{ (crashloop_logs.stdout_lines | default([])) | join(' / ') }}"
+  tags: [diagnose]
+
+# ---------------------------------------------------------------------------
+# Phase 3 - apply the fix
+# ---------------------------------------------------------------------------
+- name: "Phase 3 | create the missing configuration Secret"
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ lookup('ansible.builtin.template', 'secret.yaml.j2') | from_yaml }}"
+  notify: Restart the deployment
+  tags: [fix]
+
+- name: "Phase 3 | redeploy the app WITH its configuration"
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ lookup('ansible.builtin.template', 'deployment.yaml.j2') | from_yaml }}"
+  vars:
+    crashloop_config: true
+  tags: [fix]
+
+# ---------------------------------------------------------------------------
+# Phase 4 - assert recovery
+# ---------------------------------------------------------------------------
+- name: "Phase 4 | wait for the rollout to become available"
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: Deployment
+    namespace: "{{ lab_namespace }}"
+    name: "{{ app_name }}"
+  register: crashloop_rollout
+  until:
+    - crashloop_rollout.resources | length > 0
+    - crashloop_rollout.resources[0].status.readyReplicas | default(0) | int == replicas | int
+    - crashloop_rollout.resources[0].status.updatedReplicas | default(0) | int == replicas | int
+  retries: 30
+  delay: 5
+  tags: [verify]
+
+- name: "Phase 4 | assert recovery"
+  ansible.builtin.assert:
+    that:
+      - crashloop_rollout.resources[0].status.readyReplicas | int == replicas | int
+    success_msg: >-
+      RECOVERED - {{ crashloop_rollout.resources[0].status.readyReplicas }}/{{ replicas }}
+      replicas ready in namespace {{ lab_namespace }}
+    fail_msg: >-
+      Expected {{ replicas }} ready replicas, got
+      {{ crashloop_rollout.resources[0].status.readyReplicas | default(0) }}
+  tags: [verify]
+
+- name: "Phase 4 | list the recovered Pods"
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Pod
+    namespace: "{{ lab_namespace }}"
+    label_selectors:
+      - "app={{ app_name }}"
+  register: crashloop_healed
+  tags: [verify]
+
+- name: "Phase 4 | print the result"
+  ansible.builtin.debug:
+    msg:
+      - "environment : {{ env }}"
+      - "namespace   : {{ lab_namespace }}"
+      - "scenario    : crashloop (missing DATABASE_URL)"
+      - "outcome     : {{ crashloop_healed.resources | length }} Pod(s) Running"
+  tags: [verify]

@@ -1,0 +1,27 @@
+---
+# Run a troubleshooting scenario end to end: reproduce the failure, diagnose it,
+# apply the fix, and assert recovery.
+#
+#   ansible-playbook playbooks/run-scenario.yml -e env=dev
+#   ansible-playbook playbooks/run-scenario.yml -e env=prod --vault-password-file .vault_pass
+#
+# dev gets a throwaway database_url from vars/dev.yml. prod does not define one,
+# so the credentials are loaded from the encrypted vault/secrets.yml instead.
+# `env` and `scenario` default in group_vars/all.yml and can be overridden with -e.
+- name: "Kubernetes troubleshooting lab - automated scenario runner"
+  hosts: lab
+  gather_facts: false
+
+  vars_files:
+    - "../vars/{{ env }}.yml"
+
+  tasks:
+    - name: "Load credentials from Ansible Vault (only when the env has none)"
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../vault/secrets.yml"
+      when: database_url is not defined
+      no_log: true
+
+    - name: "Run the scenario"
+      ansible.builtin.include_role:
+        name: "{{ scenario }}"

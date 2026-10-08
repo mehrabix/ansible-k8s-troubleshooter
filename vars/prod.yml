@@ -1,0 +1,9 @@
+# --- prod environment -------------------------------------------------------
+# `database_url` is intentionally absent here: for prod it comes from the
+# Ansible Vault file (vault/secrets.yml), not from a plain-text variable.
+env: prod
+replicas: 2
+cpu_request: 100m
+cpu_limit: 500m
+mem_request: 128Mi
+mem_limit: 256Mi

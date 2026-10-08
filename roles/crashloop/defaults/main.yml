@@ -1,0 +1,3 @@
+# Whether the deployment should receive its configuration (the fix).
+# Phase 1 runs with this false (reproduces the failure), phase 3 with true.
+crashloop_config: false

@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ lab_namespace }}
+  labels:
+    app.kubernetes.io/part-of: ansible-tshoot
+    environment: {{ env }}

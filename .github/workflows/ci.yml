@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: ansible-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install Ansible
+        run: |
+          python -m pip install --upgrade pip
+          pip install ansible-core ansible-lint
+      - name: Install collections
+        run: ansible-galaxy collection install -r requirements.yml
+      - name: Lint
+        run: ansible-lint
+
+  syntax:
+    name: Playbook syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install Ansible
+        run: |
+          python -m pip install --upgrade pip
+          pip install ansible-core
+      - name: Install collections
+        run: ansible-galaxy collection install -r requirements.yml
+      - name: --syntax-check
+        run: ansible-playbook playbooks/run-scenario.yml --syntax-check

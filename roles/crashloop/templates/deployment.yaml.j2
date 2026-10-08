@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ app_name }}
+  namespace: {{ lab_namespace }}
+  labels:
+    app: {{ app_name }}
+    environment: {{ env }}
+    managed-by: ansible
+spec:
+  replicas: {{ replicas }}
+  selector:
+    matchLabels:
+      app: {{ app_name }}
+  template:
+    metadata:
+      labels:
+        app: {{ app_name }}
+    spec:
+      containers:
+        - name: {{ app_name }}
+          image: {{ image }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              echo "validating required configuration..."
+              if [ -z "$DATABASE_URL" ]; then
+                echo "Error: DATABASE_URL environment variable is required."
+                exit 1
+              fi
+              echo "webapp started successfully"
+              sleep 3600
+{% if crashloop_config | bool %}
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ secret_name }}
+                  key: url
+{% endif %}
+          resources:
+            requests:
+              cpu: {{ cpu_request }}
+              memory: {{ mem_request }}
+            limits:
+              cpu: {{ cpu_limit }}
+              memory: {{ mem_limit }}

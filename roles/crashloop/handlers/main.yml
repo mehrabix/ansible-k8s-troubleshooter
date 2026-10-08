@@ -1,0 +1,16 @@
+---
+# A handler runs once, at the end of the play, and only if something notified
+# it — Ansible's version of "restart the service after a config change".
+- name: Restart the deployment
+  kubernetes.core.k8s:
+    state: patched
+    api_version: apps/v1
+    kind: Deployment
+    namespace: "{{ lab_namespace }}"
+    name: "{{ app_name }}"
+    definition:
+      spec:
+        template:
+          metadata:
+            annotations:
+              kubectl.kubernetes.io/restartedAt: "{{ lookup('pipe', 'date -Iseconds') }}"
